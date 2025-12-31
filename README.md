@@ -1,10 +1,3 @@
-Here is the updated **Public README.md**.
-
-It reflects the actual state of the project (Dynamic Pricing, Multi-Gateway, Offline Support) and clearly outlines the roadmap as requested.
-
-***
-
-```markdown
 # SolydFlow Flutter SDK
 
 <p align="center">
@@ -174,4 +167,3 @@ SolydFlow is compliant with industry standards.
   <br>
   <a href="https://solydflow.com">Get Early Access</a>
 </p>
-```
