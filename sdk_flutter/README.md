@@ -40,6 +40,7 @@ Add the SolydFlow SDK to your Flutter project.
 
 Open your `pubspec.yaml` and add:
 
+
 ```yaml
 dependencies:
   flutter:
