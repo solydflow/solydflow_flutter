@@ -1,7 +1,7 @@
 # SolydFlow Flutter SDK
 
 <p align="center">
-  <img src="https://via.placeholder.com/150x50?text=SolydFlow" alt="SolydFlow Logo" width="200"/>
+  <img src="https://solydflow.com/logo.png" alt="SolydFlow Logo" width="200"/>
   <br>
   <b>The Revenue Infrastructure for African Mobile Apps.</b>
   <br>
