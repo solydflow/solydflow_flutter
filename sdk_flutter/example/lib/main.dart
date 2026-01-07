@@ -3,29 +3,33 @@ import 'package:solydflow_flutter/solydflow_flutter.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Using a test ID
+
+  // 1. Initialize SolydFlow
+  // Replace with your actual Project API Key from the Dashboard
   await SolydFlow.configure(
     apiKey: "sf_live_test123", 
-    userID: "test_user_new_1"
+    userID: "user_example_001" 
   );
+
   runApp(const MyApp());
 }
 
-// 1. Setup Class (Does not hold state)
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      theme: ThemeData.dark().copyWith(scaffoldBackgroundColor: Colors.black),
-      // 2. We move the UI to a separate widget so it gets a valid Context
-      home: const HomePage(), 
+      theme: ThemeData.dark().copyWith(
+        scaffoldBackgroundColor: const Color(0xFF0A0A0A),
+        primaryColor: Colors.orange,
+        colorScheme: ColorScheme.fromSwatch(primarySwatch: Colors.orange).copyWith(secondary: Colors.orange),
+      ),
+      home: const HomePage(),
     );
   }
 }
 
-// 3. UI Class (Holds State & Logic)
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -34,45 +38,62 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  bool isPro = false;
-  bool isLoading = false;
-  List<SolydPackage> offerings = []; 
+  bool _isLoading = true;
+  List<SolydPackage> _offerings = [];
+  CustomerInfo? _customerInfo;
 
   @override
   void initState() {
     super.initState();
     _initData();
-    // _checkStatus();
-  }
-
-  Future<void> _checkStatus() async {
-    bool status = await SolydFlow.getIsPro();
-    if (mounted) setState(() => isPro = status);
   }
 
   Future<void> _initData() async {
-    // 1. Check Status
-    bool status = await SolydFlow.getIsPro();
-    // 2. Fetch Products
-    List<SolydPackage> packages = await SolydFlow.getOfferings();
-    
+    setState(() => _isLoading = true);
+
+    // 2. Fetch User Status (Entitlements)
+    // We get the full info object to see ALL active entitlements
+    final info = await SolydFlow.getCustomerInfo();
+
+    // 3. Fetch Available Products (Pricing)
+    final packages = await SolydFlow.getOfferings();
+
     if (mounted) {
       setState(() {
-        isPro = status;
-        offerings = packages;
+        _customerInfo = info;
+        _offerings = packages;
+        _isLoading = false;
       });
     }
   }
 
-  Future<void> _handlePurchase(String packageID) async {
-    setState(() => isLoading = true);
-    await SolydFlow.purchasePackage(context, packageID); // Pass the ID
-    bool status = await SolydFlow.getIsPro(); // Check status again
-    if (mounted) {
-      setState(() {
-        isPro = status;
-        isLoading = false;
-      });
+  Future<void> _buyPackage(String identifier) async {
+    setState(() => _isLoading = true);
+
+    try {
+      // 4. Trigger Purchase
+      // This handles the native/web UI and returns the updated info if successful
+      final updatedInfo = await SolydFlow.purchasePackage(context, identifier);
+
+      if (updatedInfo != null) {
+        setState(() {
+          _customerInfo = updatedInfo;
+        });
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Purchase Successful! Access Unlocked."), backgroundColor: Colors.green),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Failed: $e"), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -80,145 +101,126 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('SolydFlow Dynamic'),
-        backgroundColor: Colors.grey[900],
+        title: const Text('SolydFlow Example'), 
+        backgroundColor: Colors.black,
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: () async {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text("Syncing with server..."))
-              );
-              await _checkStatus();
-            },
+            onPressed: _initData,
+            tooltip: "Refresh Status",
           )
         ],
       ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            // STATUS UI
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              decoration: BoxDecoration(
-                color: isPro ? Colors.green.withOpacity(0.2) : Colors.red.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: isPro ? Colors.green : Colors.red),
-              ),
-              child: Text(
-                isPro ? "PRO MEMBER 💎" : "FREE USER",
-                style: TextStyle(color: isPro ? Colors.green : Colors.red, fontWeight: FontWeight.bold, fontSize: 18),
-              ),
-            ),
-            const SizedBox(height: 40),
-
-            // DYNAMIC PAYWALL
-            if (!isPro && offerings.isEmpty)
-              const CircularProgressIndicator(),
-
-            if (!isPro && offerings.isNotEmpty) ...[
-              const Text("Choose a Plan:", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 20),
-              
-              // Generate Buttons for every package in DB
-              ...offerings.map((pkg) => Padding(
-                padding: const EdgeInsets.only(bottom: 12.0),
-                child: SizedBox(
-                  width: 250,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.orange,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
+      body: _isLoading && _offerings.isEmpty
+          ? const Center(child: CircularProgressIndicator())
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  
+                  // --- SECTION 1: STATUS ---
+                  const Text("CURRENT ACCESS", style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 10),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF111111),
+                      border: Border.all(color: Colors.grey[800]!),
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    onPressed: isLoading ? null : () => _handlePurchase(pkg.identifier),
-                    child: Text(
-                      "${pkg.name} - ₦${pkg.amountKobo / 100}",
-                      style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text("User ID: ${_customerInfo?.userID ?? '...'}", style: const TextStyle(color: Colors.grey)),
+                        const SizedBox(height: 10),
+                        
+                        if (_customerInfo?.activeEntitlements.isEmpty ?? true)
+                          const Row(
+                            children: [
+                              Icon(Icons.lock, color: Colors.red, size: 16),
+                              SizedBox(width: 8),
+                              Text("Free User (No Active Entitlements)", style: TextStyle(fontWeight: FontWeight.bold)),
+                            ],
+                          )
+                        else
+                          Wrap(
+                            spacing: 8,
+                            children: _customerInfo!.activeEntitlements.keys.map((entitlement) {
+                              // Only show active ones
+                              if (_customerInfo!.activeEntitlements[entitlement] == true) {
+                                return Chip(
+                                  label: Text(entitlement.toUpperCase()),
+                                  backgroundColor: Colors.green.withOpacity(0.2),
+                                  labelStyle: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold),
+                                  side: BorderSide.none,
+                                  avatar: const Icon(Icons.check_circle, color: Colors.green, size: 16),
+                                );
+                              }
+                              return const SizedBox();
+                            }).toList(),
+                          )
+                      ],
                     ),
                   ),
-                ),
-              )),
-            ]
-          ],
-        ),
-      ),
+
+                  const SizedBox(height: 30),
+
+                  // --- SECTION 2: PAYWALL ---
+                  const Text("AVAILABLE PACKAGES", style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 10),
+                  
+                  if (_offerings.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.all(20.0),
+                      child: Text("No packages configured in dashboard.", style: TextStyle(color: Colors.grey)),
+                    ),
+
+                  ..._offerings.map((pkg) {
+                    // Check if we already own this package's entitlement
+                    final bool isOwned = _customerInfo?.activeEntitlements[pkg.entitlementID] == true;
+
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF161616),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isOwned ? Colors.green.withOpacity(0.3) : Colors.grey[800]!
+                        ),
+                      ),
+                      child: ListTile(
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                        title: Text(pkg.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const SizedBox(height: 4),
+                            Text("${pkg.currency} ${(pkg.amountKobo / 100).toStringAsFixed(2)} / ${pkg.duration}"),
+                            Text(
+                              "Unlocks: ${pkg.entitlementID}", 
+                              style: TextStyle(fontSize: 10, color: Colors.orange[300])
+                            ),
+                          ],
+                        ),
+                        trailing: isOwned 
+                          ? const Icon(Icons.check, color: Colors.green)
+                          : ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.white,
+                                foregroundColor: Colors.black,
+                              ),
+                              onPressed: _isLoading ? null : () => _buyPackage(pkg.identifier),
+                              child: const Text("Buy"),
+                            ),
+                      ),
+                    );
+                  }),
+
+                ],
+              ),
+            ),
     );
   }
 }
-
-//   Future<void> _checkStatus() async {
-//     bool status = await SolydFlow.getIsPro();
-//     if (mounted) setState(() => isPro = status);
-//   }
-
-//   Future<void> _handlePurchase() async {
-//     setState(() => isLoading = true);
-    
-//     // NOW this context is valid because it is under MaterialApp
-//     await SolydFlow.purchasePackage(context);
-    
-//     await _checkStatus();
-//     if (mounted) setState(() => isLoading = false);
-//   }
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return Scaffold(
-//       appBar: AppBar(
-//         title: const Text('SolydFlow Demo'), 
-//         backgroundColor: Colors.grey[900],
-//         actions: [
-//           IconButton(
-//             icon: const Icon(Icons.refresh),
-//             onPressed: () async {
-//               ScaffoldMessenger.of(context).showSnackBar(
-//                 const SnackBar(content: Text("Syncing with server..."))
-//               );
-//               await _checkStatus();
-//             },
-//           )
-//         ],
-//       ),
-//       body: Center(
-//         child: Column(
-//           mainAxisAlignment: MainAxisAlignment.center,
-//           children: [
-//             Container(
-//               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-//               decoration: BoxDecoration(
-//                 color: isPro ? Colors.green.withOpacity(0.2) : Colors.red.withOpacity(0.2),
-//                 borderRadius: BorderRadius.circular(20),
-//                 border: Border.all(color: isPro ? Colors.green : Colors.red),
-//               ),
-//               child: Text(
-//                 isPro ? "STATUS: PRO MEMBER 💎" : "STATUS: FREE USER",
-//                 style: TextStyle(
-//                   color: isPro ? Colors.green : Colors.red, 
-//                   fontWeight: FontWeight.bold, 
-//                   fontSize: 18
-//                 ),
-//               ),
-//             ),
-//             const SizedBox(height: 40),
-//             if (!isPro)
-//               ElevatedButton.icon(
-//                 style: ElevatedButton.styleFrom(
-//                   backgroundColor: Colors.orange,
-//                   padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15)
-//                 ),
-//                 onPressed: isLoading ? null : _handlePurchase,
-//                 icon: const Icon(Icons.flash_on, color: Colors.black),
-//                 label: Text(
-//                   isLoading ? "Processing..." : "Upgrade to Pro",
-//                   style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
-//                 ),
-//               ),
-//             if (isPro)
-//               const Text("🎉 You have unlocked all features!", style: TextStyle(color: Colors.grey))
-//           ],
-//         ),
-//       ),
-//     );
-//   }
-// }
