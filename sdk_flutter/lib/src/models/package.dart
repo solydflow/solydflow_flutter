@@ -15,6 +15,7 @@ class SolydPackage {
     required this.duration,
   });
 
+
   factory SolydPackage.fromJson(Map<String, dynamic> json) {
     return SolydPackage(
       identifier: json['identifier'],
