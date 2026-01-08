@@ -12,7 +12,7 @@ class SolydFlow {
   
   static String? _apiKey;
   static String? _userID;
-  static const String _baseUrl = "https://solydflow.com"; 
+  static const String _baseUrl = "https://api.solydflow.com"; 
 
   // --- CONFIGURATION ---
   static Future<void> configure({required String apiKey, required String userID}) async {
