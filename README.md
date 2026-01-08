@@ -7,15 +7,16 @@
   <br>
   <br>
   <a href="https://solydflow.com"><img src="https://img.shields.io/badge/Status-Public%20Alpha-orange" alt="Status"></a>
-  <a href="https://pub.dev/packages/solydflow_flutter"><img src="https://img.shields.io/badge/Platform-Flutter-blue" alt="Platform"></a>
-  <a href="https://solydflow.com"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
+  <!-- <a href="https://pub.dev/packages/solydflow_flutter"><img src="https://img.shields.io/badge/Platform-Flutter-blue" alt="Platform"></a> -->
+  <!-- <a href="https://solydflow.com"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a> -->
 </p>
 
 ---
 
 ## What is SolydFlow?
 
-SolydFlow is a hybrid revenue SDK designed to solve the fragmentation of mobile payments in Africa. It allows you to accept local payments (Mobile Money, USSD, Bank Transfer) and manage subscriptions without building your own backend.
+SolydFlow is the revenue infrastructure for African mobile apps. It unifies Paystack, Flutterwave, Apple IAP, and Google Play into a single API that handles **offline entitlements** and **transaction recovery**.
+Our current implementation are Paystack and Flutterwave, while others are in progress...
 
 **The Problem:**
 If a user pays via USSD and their network drops before returning to your app, the transaction is usually lost ("Zombie Transaction").
@@ -25,7 +26,7 @@ We perform background webhook recovery, ensuring that even if the user's phone d
 ## Key Features
 
 - 🌍 **Multi-Gateway Support:** Switch between Paystack and Flutterwave instantly from the dashboard. No code changes required.
-- ⚡ **Offline-First Entitlements:** User status (`isPro`) is cached and encrypted locally.
+- ⚡ **Offline-First Entitlements:** User status entitlement is cached and encrypted locally.
 - 🏷️ **Dynamic Pricing:** Change prices, currency, and duration remotely without updating your app.
 - 🔄 **Smart Recovery:** Automated polling and webhook reconciliation for unstable networks.
 - 📊 **Analytics:** Track revenue and active subscribers out of the box.
@@ -38,14 +39,21 @@ Add the package to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  solydflow_flutter: ^0.1.0
+  flutter:
+    sdk: flutter
+  # For Alpha Access:
+  solydflow_flutter:
+    git:
+      url: https://github.com/solydflow/solydflow_flutter.git
+      path: sdk_flutter
+      ref: v0.3.0
 ```
 
 ## Quick Start
 
 ### 1. Initialization
 
-Initialize the SDK in your `main.dart` using the API Key from your [SolydFlow Console](https://solydflow.com/console).
+Initialize the SDK in your `main.dart` using the API Key from your [SolydFlow Console](https://console.solydflow.com/).
 
 ```dart
 import 'package:solydflow_flutter/solydflow_flutter.dart';
@@ -90,14 +98,15 @@ Pass the `context` (for the secure payment view) and the `identifier` of the pac
 ```dart
 Future<void> buyPlan(BuildContext context, String packageID) async {
   try {
-    // SolydFlow handles the payment UI (Paystack/Flutterwave)
-    // and verifies the transaction automatically.
-    await SolydFlow.purchasePackage(context, packageID);
-    
-    // Check status immediately after
-    bool isPro = await SolydFlow.getIsPro();
-    if (isPro) {
-      print("Success! User is now Pro.");
+    // 1. Trigger Purchase (Opens WebView)
+    final CustomerInfo? info = await SolydFlow.purchasePackage(context, packageID);
+
+    if (info == null) return;
+
+    // 2. Check Status Immediately
+    if (await SolydFlow.hasEntitlement("gold_access")) {
+      Navigator.pop(context); // Close Paywall
+      print("Welcome to the Gold Club!");
     }
   } catch (e) {
     print("Purchase failed: $e");
@@ -105,19 +114,18 @@ Future<void> buyPlan(BuildContext context, String packageID) async {
 }
 ```
 
-### 4. Checking Status (Offline Supported)
-
-This check is instant and synchronous after the first load.
+### 4. Checking Access (The Gatekeeper/Offline Supported)
+You can check if a user has access anywhere in your app. This checks the local encrypted cache first, making it **instant and offline-safe**.
 
 ```dart
-void checkStatus() async {
-  // Checks local encrypted cache
-  bool isPro = await SolydFlow.getIsPro();
-  
-  if (isPro) {
-    // Grant access to Pro features
+Future<void> checkAccess() async {
+  // Check for the "Entitlement ID" you set in Dashboard Step 3
+  if (await SolydFlow.hasEntitlement("gold_access")) {
+    print("User is Gold! 💎");
+    // Navigate to Premium Content
   } else {
-    // Lock features
+    print("User is Free.");
+    // Show Paywall
   }
 }
 ```
