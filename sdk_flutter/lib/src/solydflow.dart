@@ -87,8 +87,18 @@ class SolydFlow {
   // Get full info object
   static Future<CustomerInfo> getCustomerInfo() async {
     if (_userID == null) throw Exception("User ID not set");
+    if (_apiKey == null) throw Exception("API Key not set. Call configure() first.");
+
     try {
-      final response = await _dio.get('$_baseUrl/api/v1/status', queryParameters: {"user_id": _userID});
+      final response = await _dio.get(
+        '$_baseUrl/api/v1/status', 
+        queryParameters: {"user_id": _userID},
+        // 🟢 FIX: Add the Header options here
+        options: Options(headers: {
+          "X-API-Key": _apiKey,
+          "Content-Type": "application/json",
+        }),
+      );
       return CustomerInfo.fromJson(response.data);
     } catch (e) {
       // Return empty info on error (offline mode would use cache here)
@@ -99,12 +109,16 @@ class SolydFlow {
   // INTERNAL VERIFICATION LOOP
   static Future<CustomerInfo> _verifyTransaction(String reference) async {
     int attempts = 0;
-    while (attempts < 5) {
+    while (attempts < 10) {
       attempts++;
       try {
         final response = await _dio.get(
           '$_baseUrl/api/v1/pay/verify', 
-          queryParameters: {"reference": reference}
+          queryParameters: {"reference": reference},
+          // 🟢 FIX: Add headers here too
+          options: Options(headers: {
+             "X-API-Key": _apiKey
+          }),
         );
         if (response.data['status'] == 'success') {
           return await getCustomerInfo(); // Sync latest data
