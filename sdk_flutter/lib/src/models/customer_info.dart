@@ -32,4 +32,19 @@ class CustomerInfo {
       allEntitlements: dates,
     );
   }
+
+  // 🟢 NEW: Convert back to JSON for storage
+  Map<String, dynamic> toJson() {
+    // Convert Dates back to ISO Strings
+    Map<String, String> entitlementsString = {};
+    allEntitlements.forEach((key, date) {
+      entitlementsString[key] = date.toIso8601String();
+    });
+
+    return {
+      'user_id': userID,
+      'active': activeEntitlements,
+      'entitlements': entitlementsString,
+    };
+  }
 }

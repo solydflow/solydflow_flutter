@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'models/package.dart';
 import 'models/customer_info.dart';
+import 'cache_manager.dart';
 
 class SolydFlow {
   static final Dio _dio = Dio(BaseOptions(
@@ -91,27 +92,95 @@ class SolydFlow {
     return info.activeEntitlements[entitlementID] == true;
   }
 
-  // Get full info object
-  static Future<CustomerInfo> getCustomerInfo() async {
+  // 1. Get Info (Offline First Strategy)
+  static Future<CustomerInfo> getCustomerInfo({bool forceRefresh = false}) async {
     if (_userID == null) throw Exception("User ID not set");
-    if (_apiKey == null) throw Exception("API Key not set. Call configure() first.");
 
+    CustomerInfo? cachedInfo;
+
+    // A. Try Load Cache
+    if (!forceRefresh) {
+      cachedInfo = await SolydCache.load(_userID!);
+    }
+
+    // B. Decide: Network or Cache?
+    // If we have cache and it's not stale, return it immediately.
+    // If it IS stale, we return it anyway but trigger a background refresh? 
+    // Ideally: If cache exists, return it. Sync in background.
+    
+    // STRATEGY: 
+    // 1. If Cache Exists -> Return Cache. Trigger Background Sync.
+    // 2. If Cache Null -> Await Network.
+    
+    if (cachedInfo != null) {
+      // 🚀 SPEED: Return instantly
+      // Check for staleness in background to update for NEXT launch
+      _syncInBackground(); 
+      return cachedInfo;
+    }
+
+    // C. No Cache? Must fetch from Network
     try {
-      final response = await _dio.get(
-        '$_baseUrl/api/v1/status', 
-        queryParameters: {"user_id": _userID},
-        // 🟢 FIX: Add the Header options here
-        options: Options(headers: {
-          "X-API-Key": _apiKey,
-          "Content-Type": "application/json",
-        }),
-      );
-      return CustomerInfo.fromJson(response.data);
+      return await _fetchFromNetwork();
     } catch (e) {
-      // Return empty info on error (offline mode would use cache here)
+      // If network fails and no cache, return empty (Free) state
       return CustomerInfo(userID: _userID!, activeEntitlements: {}, allEntitlements: {});
     }
   }
+
+  // Helper: Network Fetch & Save
+  static Future<CustomerInfo> _fetchFromNetwork() async {
+    final response = await _dio.get(
+      '$_baseUrl/api/v1/status', 
+      queryParameters: {"user_id": _userID},
+      options: Options(headers: {
+        "X-API-Key": _apiKey,
+        "Content-Type": "application/json",
+      }),
+    );
+    
+    final info = CustomerInfo.fromJson(response.data);
+    
+    // 💾 CACHE IT
+    await SolydCache.save(_userID!, info);
+    
+    return info;
+  }
+
+  // Fire-and-forget sync
+  static Future<void> _syncInBackground() async {
+    try {
+      // Only sync if stale (optional optimization)
+      if (await SolydCache.isStale(_userID!)) {
+        print("SolydFlow: Syncing stale cache in background...");
+        await _fetchFromNetwork();
+      }
+    } catch (e) {
+      // Silent failure is fine in background
+    }
+  }
+
+  // // Get full info object
+  // static Future<CustomerInfo> getCustomerInfo_() async {
+  //   if (_userID == null) throw Exception("User ID not set");
+  //   if (_apiKey == null) throw Exception("API Key not set. Call configure() first.");
+
+  //   try {
+  //     final response = await _dio.get(
+  //       '$_baseUrl/api/v1/status', 
+  //       queryParameters: {"user_id": _userID},
+  //       // 🟢 FIX: Add the Header options here
+  //       options: Options(headers: {
+  //         "X-API-Key": _apiKey,
+  //         "Content-Type": "application/json",
+  //       }),
+  //     );
+  //     return CustomerInfo.fromJson(response.data);
+  //   } catch (e) {
+  //     // Return empty info on error (offline mode would use cache here)
+  //     return CustomerInfo(userID: _userID!, activeEntitlements: {}, allEntitlements: {});
+  //   }
+  // }
 
   // INTERNAL VERIFICATION LOOP
   static Future<CustomerInfo> _verifyTransaction(String reference) async {
@@ -128,12 +197,12 @@ class SolydFlow {
           }),
         );
         if (response.data['status'] == 'success') {
-          return await getCustomerInfo(); // Sync latest data
+          return await _fetchFromNetwork(); // Sync latest data
         }
       } catch (e) {}
       await Future.delayed(const Duration(seconds: 2));
     }
-    return await getCustomerInfo(); // Return whatever we have
+    return await _fetchFromNetwork(); // Return whatever we have
   }
 }
 
