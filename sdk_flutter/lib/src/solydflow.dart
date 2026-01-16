@@ -20,7 +20,14 @@ class SolydFlow {
     _userID = userID;
     // Initial handshake to create user if needed
     try {
-      await _dio.get('$_baseUrl/api/v1/status', queryParameters: {"user_id": _userID});
+      await _dio.get(
+        '$_baseUrl/api/v1/status',
+        queryParameters: {"user_id": _userID},
+        options: Options(headers: {
+          "X-API-Key": _apiKey,
+          "Content-Type": "application/json",
+          }),
+        );
     } catch (e) {
       print("SolydFlow Init Warning: $e");
     }
