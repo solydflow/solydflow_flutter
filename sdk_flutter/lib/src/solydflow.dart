@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'models/package.dart';
 import 'models/customer_info.dart';
+import 'utils/telemetry.dart';
 import 'cache_manager.dart';
 
 class SolydFlow {
@@ -54,14 +55,23 @@ class SolydFlow {
     if (_userID == null) throw Exception("SolydFlow not configured");
 
     try {
+      // 🟢 1. Collect Telemetry (Fast)
+      final telemetryData = await SolydTelemetry.collect();
+      print("📡 Telemetry collected: ${telemetryData['latency_ms']}ms");
+
       // 1. Initialize
-      final response = await _dio.get(
+      final response = await _dio.post(
         '$_baseUrl/api/v1/pay/initialize', 
         queryParameters: {
           "user_id": _userID, 
-          "package_identifier": packageIdentifier
+          "package_identifier": packageIdentifier,
+          "email": "user@email.com", // You might want to allow passing email in purchasePackage
+          "telemetry": telemetryData
         },
-        options: Options(headers: {"X-API-Key": _apiKey}), // Send Key!
+        options: Options(headers: {
+          "X-API-Key": _apiKey,
+          "Content-Type": "application/json",
+        }),
       );
       
       final String authUrl = response.data['authorization_url'];

@@ -14,8 +14,11 @@ dependencies:
     sdk: flutter
   dio: ^5.0.0
   webview_flutter: ^4.2.0
-  flutter_secure_storage: ^9.0.0
   # Add other dependencies like encryption libs here later
+  flutter_secure_storage: ^9.0.0
+  connectivity_plus: ^5.0.0 # To check Wifi vs Data
+  device_info_plus: ^9.0.0  # To get OS/Model
+  battery_plus: ^5.0.0      # To get Battery %
 
 dev_dependencies:
   flutter_test:
