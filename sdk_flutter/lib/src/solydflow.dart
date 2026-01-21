@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:uuid/uuid.dart';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'models/package.dart';
@@ -11,7 +12,7 @@ class SolydFlow {
     connectTimeout: const Duration(seconds: 10),
     receiveTimeout: const Duration(seconds: 10),
   ));
-  
+
   static String? _apiKey;
   static String? _userID;
   static const String _baseUrl = "https://api.solydflow.com"; 
@@ -55,6 +56,9 @@ class SolydFlow {
     if (_userID == null) throw Exception("SolydFlow not configured");
 
     try {
+      // Generate a unique key for THIS specific attempt
+      String idempotencyKey = const Uuid().v4();
+
       // 🟢 1. Collect Telemetry (Fast)
       final telemetryData = await SolydTelemetry.collect();
       print("📡 Telemetry collected: ${telemetryData['latency_ms']}ms");
@@ -65,12 +69,13 @@ class SolydFlow {
         queryParameters: {
           "user_id": _userID, 
           "package_identifier": packageIdentifier,
-          "email": "user@email.com", // You might want to allow passing email in purchasePackage
+          "email": "$_userID@solydflow.app", // You might want to allow passing email in purchasePackage
           "telemetry": telemetryData
         },
         options: Options(headers: {
           "X-API-Key": _apiKey,
           "Content-Type": "application/json",
+          "Idempotency-Key": idempotencyKey,
         }),
       );
       
