@@ -94,7 +94,19 @@ class SolydFlow {
       return await _verifyTransaction(reference);
 
     } catch (e) {
-      print("Purchase failed: $e");
+      // 🟢 IMPROVED ERROR LOGGING
+      if (e is DioException) {
+        if (e.response != null) {
+          // The backend sends plain text errors like "Paystack keys missing"
+          // or JSON like {"error": "..."} depending on the handler.
+          print("❌ SolydFlow Server Error: ${e.response?.data}");
+          print("❌ Status Code: ${e.response?.statusCode}");
+        } else {
+          print("❌ Network Error: ${e.message}");
+        }
+      } else {
+        print("❌ Unknown Error: $e");
+      }
       rethrow;
     }
   }
