@@ -63,15 +63,27 @@ class SolydFlow {
       final telemetryData = await SolydTelemetry.collect();
       print("📡 Telemetry collected: ${telemetryData['latency_ms']}ms");
 
+      // 🟢 SANITIZATION: Ensure no nulls are sent
+      final Map<String, dynamic> payload = {
+          "user_id": _userID ?? "",
+          "package_identifier": packageIdentifier, // Ensure this isn't null in caller
+          "email": "$_userID@solydflow.app",
+          "telemetry": {
+             "network_type": telemetryData['network_type'] ?? "unknown",
+             "latency_ms": telemetryData['latency_ms'] ?? 0,
+             "device_os": telemetryData['device_os'] ?? "unknown",
+             "device_model": telemetryData['device_model'] ?? "unknown",
+             "battery_level": telemetryData['battery_level'] ?? 0,
+          }
+      };
+
+      // Debug: Print what we are sending
+      print("🚀 Sending Payload: $payload");
+
       // 1. Initialize
       final response = await _dio.post(
         '$_baseUrl/api/v1/pay/initialize', 
-        queryParameters: {
-          "user_id": _userID, 
-          "package_identifier": packageIdentifier,
-          "email": "$_userID@solydflow.app", // You might want to allow passing email in purchasePackage
-          "telemetry": telemetryData
-        },
+        data: payload,
         options: Options(headers: {
           "X-API-Key": _apiKey,
           "Content-Type": "application/json",
