@@ -1,6 +1,9 @@
+import 'dart:async';
+import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:uuid/uuid.dart';
 import 'package:flutter/material.dart';
+import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'models/package.dart';
 import 'models/customer_info.dart';
@@ -9,19 +12,37 @@ import 'cache_manager.dart';
 
 class SolydFlow {
   static final Dio _dio = Dio(BaseOptions(
-    connectTimeout: const Duration(seconds: 10),
-    receiveTimeout: const Duration(seconds: 10),
+    connectTimeout: const Duration(seconds: 20),
+    receiveTimeout: const Duration(seconds: 20),
   ));
 
   static String? _apiKey;
   static String? _userID;
-  static const String _baseUrl = "https://api.solydflow.com"; 
+  static const String _baseUrl = "https://api.solydflow.com";
+
+  static StreamSubscription<List<PurchaseDetails>>? _iapSubscription;
+  
+  // 🟢 HELPER MAP: Apple/Google ID -> SolydFlow Identifier
+  // Needed to tell the backend what SolydFlow package was bought via Native Stores
+  static final Map<String, String> _nativeStoreToSolydMap = {};
 
   // --- CONFIGURATION ---
-  static Future<void> configure({required String apiKey, required String userID}) async {
+  static Future<void> configure({
+    required String apiKey,
+    required String userID
+  }) async {
     _apiKey = apiKey;
     _userID = userID;
-    // Initial handshake to create user if needed
+
+    final Stream<List<PurchaseDetails>> purchaseUpdated = InAppPurchase.instance.purchaseStream;
+    _iapSubscription = purchaseUpdated.listen((purchaseDetailsList) {
+      _listenToPurchaseUpdated(purchaseDetailsList);
+    }, onDone: () {
+      _iapSubscription?.cancel();
+    }, onError: (error) {
+      print("StoreKit Error: $error");
+    });
+
     try {
       await _dio.get(
         '$_baseUrl/api/v1/status',
@@ -29,8 +50,8 @@ class SolydFlow {
         options: Options(headers: {
           "X-API-Key": _apiKey,
           "Content-Type": "application/json",
-          }),
-        );
+        }),
+      );
     } catch (e) {
       print("SolydFlow Init Warning: $e");
     }
@@ -41,10 +62,25 @@ class SolydFlow {
     try {
       final response = await _dio.get(
         '$_baseUrl/api/v1/offerings',
+        queryParameters: {"user_id": _userID},
         options: Options(headers: {"X-API-Key": _apiKey}),
       );
       List<dynamic> data = response.data['offerings'];
-      return data.map((json) => SolydPackage.fromJson(json)).toList();
+      
+      final packages = data.map((json) => SolydPackage.fromJson(json)).toList();
+      
+      // 🟢 Build the memory map for Native Store validation
+      _nativeStoreToSolydMap.clear();
+      for (var pkg in packages) {
+        if (pkg.appleProductID != null && pkg.appleProductID!.isNotEmpty) {
+          _nativeStoreToSolydMap[pkg.appleProductID!] = pkg.identifier;
+        }
+        if (pkg.googleProductID != null && pkg.googleProductID!.isNotEmpty) {
+          _nativeStoreToSolydMap[pkg.googleProductID!] = pkg.identifier;
+        }
+      }
+      
+      return packages;
     } catch (e) {
       print("Error fetching offerings: $e");
       return [];
@@ -52,21 +88,19 @@ class SolydFlow {
   }
 
   // --- PURCHASE LOGIC ---
-  static Future<CustomerInfo?> purchasePackage(BuildContext context, String packageIdentifier) async {
+  static Future<CustomerInfo?> purchasePackage(
+    BuildContext context,
+    String packageIdentifier
+  ) async {
     if (_userID == null) throw Exception("SolydFlow not configured");
 
     try {
-      // Generate a unique key for THIS specific attempt
       String idempotencyKey = const Uuid().v4();
-
-      // 🟢 1. Collect Telemetry (Fast)
       final telemetryData = await SolydTelemetry.collect();
-      print("📡 Telemetry collected: ${telemetryData['latency_ms']}ms");
-
-      // 🟢 SANITIZATION: Ensure no nulls are sent
+      
       final Map<String, dynamic> payload = {
           "user_id": _userID ?? "",
-          "package_identifier": packageIdentifier, // Ensure this isn't null in caller
+          "package_identifier": packageIdentifier,
           "email": "$_userID@solydflow.app",
           "telemetry": {
              "network_type": telemetryData['network_type'] ?? "unknown",
@@ -77,12 +111,8 @@ class SolydFlow {
           }
       };
 
-      // Debug: Print what we are sending
-      print("🚀 Sending Payload: $payload");
-
-      // 1. Initialize
       final response = await _dio.post(
-        '$_baseUrl/api/v1/pay/initialize', 
+        '$_baseUrl/api/v1/pay/initialize',
         data: payload,
         options: Options(headers: {
           "X-API-Key": _apiKey,
@@ -91,83 +121,135 @@ class SolydFlow {
         }),
       );
       
-      final String authUrl = response.data['authorization_url'];
-      final String reference = response.data['reference'];
+      final data = response.data;
+      final String provider = data['provider'] ?? 'paystack'; 
 
-      // 2. Open UI
-      await Navigator.of(context).push(MaterialPageRoute(builder: (ctx) {
-        return _PaymentWebView(
-          url: authUrl, 
-          reference: reference, 
-        );
-      }));
+      // 🟢 NATIVE STORE (APPLE / GOOGLE)
+      if (provider == 'apple' || provider == 'google') {
+        final String nativeProductID = data['native_product_id'];
+        
+        final bool available = await InAppPurchase.instance.isAvailable();
+        if (!available) throw Exception("Store not available");
 
-      // 3. Verify & Return New Info
-      return await _verifyTransaction(reference);
+        final ProductDetailsResponse productDetailResponse = 
+            await InAppPurchase.instance.queryProductDetails({nativeProductID});
+        
+        if (productDetailResponse.notFoundIDs.isNotEmpty) {
+             throw Exception("Product $nativeProductID not found in Store Connect");
+        }
+
+        final ProductDetails productDetails = productDetailResponse.productDetails.first;
+        final PurchaseParam purchaseParam = PurchaseParam(productDetails: productDetails);
+
+        InAppPurchase.instance.buyNonConsumable(purchaseParam: purchaseParam);
+        
+        // Wait for Native Stream to finish and update DB
+        return await _verifyTransaction(data['reference']); 
+      } 
+      
+      // 🟢 WEB PAYMENT (Paystack / Flutterwave)
+      else {
+        final String authUrl = data['authorization_url'];
+        final String reference = data['reference'];
+
+        await Navigator.of(context).push(MaterialPageRoute(builder: (ctx) {
+          return _PaymentWebView(url: authUrl, reference: reference);
+        }));
+
+        return await _verifyTransaction(reference);
+      }
 
     } catch (e) {
-      // 🟢 IMPROVED ERROR LOGGING
       if (e is DioException) {
         if (e.response != null) {
-          // The backend sends plain text errors like "Paystack keys missing"
-          // or JSON like {"error": "..."} depending on the handler.
           print("❌ SolydFlow Server Error: ${e.response?.data}");
-          print("❌ Status Code: ${e.response?.statusCode}");
-        } else {
-          print("❌ Network Error: ${e.message}");
         }
-      } else {
-        print("❌ Unknown Error: $e");
       }
       rethrow;
     }
   }
 
+  // --- NATIVE STORE LISTENER ---
+  static Future<void> _listenToPurchaseUpdated(List<PurchaseDetails> purchaseDetailsList) async {
+    for (final PurchaseDetails purchaseDetails in purchaseDetailsList) {
+      if (purchaseDetails.status == PurchaseStatus.pending) {
+        // UI is usually locked here anyway
+      } else {
+        if (purchaseDetails.status == PurchaseStatus.error) {
+          print("Native Purchase Error: ${purchaseDetails.error}");
+        } else if (purchaseDetails.status == PurchaseStatus.purchased || 
+                   purchaseDetails.status == PurchaseStatus.restored) {
+          
+          await _validateNativeReceipt(purchaseDetails);
+        }
+        
+        if (purchaseDetails.pendingCompletePurchase) {
+          await InAppPurchase.instance.completePurchase(purchaseDetails);
+        }
+      }
+    }
+  }
+
+  static Future<void> _validateNativeReceipt(PurchaseDetails purchase) async {
+    String provider = Platform.isAndroid ? 'google' : 'apple';
+    
+    // 🟢 FIND THE SOLYD PACKAGE ID
+    String? solydPackageId = _nativeStoreToSolydMap[purchase.productID];
+    if (solydPackageId == null) {
+      print("❌ Validation Error: Could not map Native ID ${purchase.productID} to SolydFlow Package.");
+      return;
+    }
+
+    try {
+      final response = await _dio.post(
+        '$_baseUrl/api/v1/pay/verify', 
+        data: {
+            "reference": purchase.verificationData.serverVerificationData, // Receipt or Token
+            "user_id": _userID,
+            "package_id": solydPackageId,
+            "provider": provider 
+        }, 
+        options: Options(headers: {"X-API-Key": _apiKey}),
+      );
+
+      if (response.data['status'] == 'success') {
+        print("✅ Native Receipt Validated!");
+        await _fetchFromNetwork(); // Update Cache
+      }
+    } catch (e) {
+      print("Native Validation Failed: $e");
+    }
+  }
+
   // --- ENTITLEMENT CHECKS ---
   
-  // The New Standard: Check specific entitlement
   static Future<bool> hasEntitlement(String entitlementID) async {
     CustomerInfo info = await getCustomerInfo();
     return info.activeEntitlements[entitlementID] == true;
   }
 
-  // 1. Get Info (Offline First Strategy)
   static Future<CustomerInfo> getCustomerInfo({bool forceRefresh = false}) async {
     if (_userID == null) throw Exception("User ID not set");
+    if (_apiKey == null) throw Exception("API Key not set");
 
     CustomerInfo? cachedInfo;
 
-    // A. Try Load Cache
     if (!forceRefresh) {
       cachedInfo = await SolydCache.load(_userID!);
     }
 
-    // B. Decide: Network or Cache?
-    // If we have cache and it's not stale, return it immediately.
-    // If it IS stale, we return it anyway but trigger a background refresh? 
-    // Ideally: If cache exists, return it. Sync in background.
-    
-    // STRATEGY: 
-    // 1. If Cache Exists -> Return Cache. Trigger Background Sync.
-    // 2. If Cache Null -> Await Network.
-    
     if (cachedInfo != null) {
-      // 🚀 SPEED: Return instantly
-      // Check for staleness in background to update for NEXT launch
       _syncInBackground(); 
       return cachedInfo;
     }
 
-    // C. No Cache? Must fetch from Network
     try {
       return await _fetchFromNetwork();
     } catch (e) {
-      // If network fails and no cache, return empty (Free) state
       return CustomerInfo(userID: _userID!, activeEntitlements: {}, allEntitlements: {});
     }
   }
 
-  // Helper: Network Fetch & Save
   static Future<CustomerInfo> _fetchFromNetwork() async {
     final response = await _dio.get(
       '$_baseUrl/api/v1/status', 
@@ -179,49 +261,18 @@ class SolydFlow {
     );
     
     final info = CustomerInfo.fromJson(response.data);
-    
-    // 💾 CACHE IT
     await SolydCache.save(_userID!, info);
-    
     return info;
   }
 
-  // Fire-and-forget sync
   static Future<void> _syncInBackground() async {
     try {
-      // Only sync if stale (optional optimization)
       if (await SolydCache.isStale(_userID!)) {
-        print("SolydFlow: Syncing stale cache in background...");
         await _fetchFromNetwork();
       }
-    } catch (e) {
-      // Silent failure is fine in background
-    }
+    } catch (e) {}
   }
 
-  // // Get full info object
-  // static Future<CustomerInfo> getCustomerInfo_() async {
-  //   if (_userID == null) throw Exception("User ID not set");
-  //   if (_apiKey == null) throw Exception("API Key not set. Call configure() first.");
-
-  //   try {
-  //     final response = await _dio.get(
-  //       '$_baseUrl/api/v1/status', 
-  //       queryParameters: {"user_id": _userID},
-  //       // 🟢 FIX: Add the Header options here
-  //       options: Options(headers: {
-  //         "X-API-Key": _apiKey,
-  //         "Content-Type": "application/json",
-  //       }),
-  //     );
-  //     return CustomerInfo.fromJson(response.data);
-  //   } catch (e) {
-  //     // Return empty info on error (offline mode would use cache here)
-  //     return CustomerInfo(userID: _userID!, activeEntitlements: {}, allEntitlements: {});
-  //   }
-  // }
-
-  // INTERNAL VERIFICATION LOOP
   static Future<CustomerInfo> _verifyTransaction(String reference) async {
     int attempts = 0;
     while (attempts < 10) {
@@ -230,22 +281,18 @@ class SolydFlow {
         final response = await _dio.get(
           '$_baseUrl/api/v1/pay/verify', 
           queryParameters: {"reference": reference},
-          // 🟢 FIX: Add headers here too
-          options: Options(headers: {
-             "X-API-Key": _apiKey
-          }),
+          options: Options(headers: {"X-API-Key": _apiKey}),
         );
         if (response.data['status'] == 'success') {
-          return await _fetchFromNetwork(); // Sync latest data
+          return await _fetchFromNetwork(); 
         }
       } catch (e) {}
       await Future.delayed(const Duration(seconds: 2));
     }
-    return await _fetchFromNetwork(); // Return whatever we have
+    return await _fetchFromNetwork(); 
   }
 }
 
-// Minimal WebView Widget
 class _PaymentWebView extends StatefulWidget {
   final String url;
   final String reference;

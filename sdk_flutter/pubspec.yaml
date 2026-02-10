@@ -18,8 +18,11 @@ dependencies:
   # Add other dependencies like encryption libs here later
   flutter_secure_storage: ^9.0.0
   connectivity_plus: ^6.0.0 # To check Wifi vs Data
-  device_info_plus: ^9.0.0  # To get OS/Model
-  battery_plus: ^5.0.0      # To get Battery %
+  device_info_plus: ^10.0.0  # To get OS/Model
+  battery_plus: ^6.0.0      # To get Battery %
+
+  in_app_purchase: ^3.2.0
+  io: ^1.0.4
 
 dev_dependencies:
   flutter_test:
