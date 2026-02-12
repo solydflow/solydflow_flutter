@@ -57,8 +57,33 @@ class SolydFlow {
     }
   }
 
+  /// 🟢 NEW: Track SDK Events (Analytic Funnel)
+  static Future<void> trackEvent(String eventType, {Map<String, dynamic>? metadata}) async {
+    if (_userID == null || _apiKey == null) return;
+
+    try {
+      await _dio.post(
+        '$_baseUrl/api/v1/event',
+        data: {
+          "user_id": _userID,
+          "event_type": eventType,
+          "metadata": metadata != null ? jsonEncode(metadata) : "{}",
+        },
+        options: Options(headers: {"X-API-Key": _apiKey}),
+      );
+    } catch (e) {
+      // Silent fail for analytics
+      print("SolydFlow Analytics Error: $e");
+    }
+  }
+
   // --- FETCH PRODUCTS ---
   static Future<List<SolydPackage>> getOfferings() async {
+    // 1. Trigger Tracking automatically
+    if (!silent) {
+      trackEvent("paywall_viewed");
+    }
+
     try {
       final response = await _dio.get(
         '$_baseUrl/api/v1/offerings',
