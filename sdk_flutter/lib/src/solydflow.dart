@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:uuid/uuid.dart';
 import 'package:flutter/material.dart';
@@ -78,7 +79,7 @@ class SolydFlow {
   }
 
   // --- FETCH PRODUCTS ---
-  static Future<List<SolydPackage>> getOfferings() async {
+  static Future<List<SolydPackage>> getOfferings({bool silent = false}) async {
     // 1. Trigger Tracking automatically
     if (!silent) {
       trackEvent("paywall_viewed");
