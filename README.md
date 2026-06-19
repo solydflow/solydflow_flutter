@@ -282,10 +282,10 @@ Supported routing rules can be configured from the SolydFlow Console without app
 |-----------|---------|
 | Paystack | ✅ Live |
 | Flutterwave | ✅ Live |
-| Apple App Store | 🧪 Testing |
-| Google Play | 🧪 Testing |
-| Stripe | 🧪 Testing |
-| Monnify | 🚧 Planned |
+| Apple App Store | ✅ Live |
+| Google Play | ✅ Live |
+| Stripe | ✅ Live |
+| Monnify | 🧪 Testing |
 | M-Pesa / Daraja | 🚧 Planned |
 
 ---
