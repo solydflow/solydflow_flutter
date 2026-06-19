@@ -5,11 +5,12 @@ class SolydPackage {
   final int amountKobo;
   final String currency;
   final String duration;
-  final int tierLevel; // 🟢 ADD THIS
-  final String? appleProductID;  // 🟢 NEW
-  final String? googleProductID; // 🟢 NEW
-  final int calculatedAmountKobo; // 🟢 NEW
-  final bool isUpgrade;           // 🟢 NEW
+  final int tierLevel;
+  final String? appleProductID;
+  final String? googleProductID;
+  final int calculatedAmountKobo;
+  final bool isUpgrade;
+  final bool isVariablePrice;
 
   SolydPackage({
     required this.identifier,
@@ -23,6 +24,7 @@ class SolydPackage {
     this.googleProductID,
     required this.calculatedAmountKobo,
     required this.isUpgrade,
+    required this.isVariablePrice,
   });
 
   factory SolydPackage.fromJson(Map<String, dynamic> json) {
@@ -39,6 +41,7 @@ class SolydPackage {
       // If backend sends it, use it. Otherwise default to standard price.
       calculatedAmountKobo: json['calculated_amount_kobo'] ?? json['amount_kobo'],
       isUpgrade: json['is_upgrade'] ?? false,
+      isVariablePrice: json['is_variable_price'] == true,
     );
   }
 }

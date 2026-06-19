@@ -1,4 +1,16 @@
+
 # 🚀 Getting Started with SolydFlow
+
+<p align="center">
+  <img src="https://solydflow.com/logo.png" alt="SolydFlow Logo" width="200"/>
+  <br>
+  <b>The Revenue Infrastructure for African Mobile Apps.</b>
+  <br>
+  <br>
+  <a href="https://solydflow.com"><img src="https://img.shields.io/badge/Status-Production%20v1.0-green" alt="Status"></a>
+  <a href="https://pub.dev/packages/solydflow_flutter"><img src="https://img.shields.io/badge/Platform-Flutter-blue" alt="Platform"></a>
+  <a href="https://solydflow.com"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
+</p>
 
 Welcome to SolydFlow. This guide will help you integrate robust revenue infrastructure into your Flutter app in under 15 minutes. By the end of this guide, your app will be able to accept payments via Paystack/Flutterwave (Apple Pay, Google Pay and M-pesa coming soon), handle offline entitlements, and recover failed transactions automatically.
 

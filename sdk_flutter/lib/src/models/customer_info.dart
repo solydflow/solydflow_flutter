@@ -2,11 +2,13 @@ class CustomerInfo {
   final String userID;
   final Map<String, bool> activeEntitlements; // {"gold": true, "silver": false}
   final Map<String, DateTime> allEntitlements; // {"gold": "2025-12-31..."}
+  final List<String> activePackages;
 
   CustomerInfo({
     required this.userID,
     required this.activeEntitlements,
     required this.allEntitlements,
+    required this.activePackages,
   });
 
   factory CustomerInfo.fromJson(Map<String, dynamic> json) {
@@ -26,14 +28,20 @@ class CustomerInfo {
       });
     }
 
+    List<String> packages = [];
+    if (json['active_packages'] != null) {
+      packages = List<String>.from(json['active_packages']);
+    }
+
     return CustomerInfo(
       userID: json['user_id'],
       activeEntitlements: active,
       allEntitlements: dates,
+      activePackages: packages,
     );
   }
 
-  // 🟢 NEW: Convert back to JSON for storage
+  // Convert back to JSON for storage
   Map<String, dynamic> toJson() {
     // Convert Dates back to ISO Strings
     Map<String, String> entitlementsString = {};
@@ -45,6 +53,7 @@ class CustomerInfo {
       'user_id': userID,
       'active': activeEntitlements,
       'entitlements': entitlementsString,
+      'active_packages': activePackages,
     };
   }
 }

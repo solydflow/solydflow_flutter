@@ -8,6 +8,7 @@ import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'models/package.dart';
 import 'models/customer_info.dart';
+import 'models/paywall_config.dart';
 import 'utils/telemetry.dart';
 import 'cache_manager.dart';
 
@@ -19,21 +20,24 @@ class SolydFlow {
 
   static String? _apiKey;
   static String? _userID;
+  static String? _userPhone;
   static const String _baseUrl = "https://api.solydflow.com";
 
   static StreamSubscription<List<PurchaseDetails>>? _iapSubscription;
   
-  // 🟢 HELPER MAP: Apple/Google ID -> SolydFlow Identifier
+  // HELPER MAP: Apple/Google ID -> SolydFlow Identifier
   // Needed to tell the backend what SolydFlow package was bought via Native Stores
   static final Map<String, String> _nativeStoreToSolydMap = {};
 
   // --- CONFIGURATION ---
   static Future<void> configure({
     required String apiKey,
-    required String userID
+    required String userID,
+    String? userPhone,
   }) async {
     _apiKey = apiKey;
     _userID = userID;
+    _userPhone = userPhone;
 
     final Stream<List<PurchaseDetails>> purchaseUpdated = InAppPurchase.instance.purchaseStream;
     _iapSubscription = purchaseUpdated.listen((purchaseDetailsList) {
@@ -58,7 +62,7 @@ class SolydFlow {
     }
   }
 
-  /// 🟢 NEW: Track SDK Events (Analytic Funnel)
+  /// NEW: Track SDK Events (Analytic Funnel)
   static Future<void> trackEvent(String eventType, {Map<String, dynamic>? metadata}) async {
     if (_userID == null || _apiKey == null) return;
 
@@ -80,6 +84,8 @@ class SolydFlow {
 
   // --- FETCH PRODUCTS ---
   static Future<List<SolydPackage>> getOfferings({bool silent = false}) async {
+    if (_apiKey == null || _userID == null) throw Exception("SolydFlow not configured");
+
     // 1. Trigger Tracking automatically
     if (!silent) {
       trackEvent("paywall_viewed");
@@ -95,7 +101,7 @@ class SolydFlow {
       
       final packages = data.map((json) => SolydPackage.fromJson(json)).toList();
       
-      // 🟢 Build the memory map for Native Store validation
+      // Build the memory map for Native Store validation
       _nativeStoreToSolydMap.clear();
       for (var pkg in packages) {
         if (pkg.appleProductID != null && pkg.appleProductID!.isNotEmpty) {
@@ -116,18 +122,24 @@ class SolydFlow {
   // --- PURCHASE LOGIC ---
   static Future<CustomerInfo?> purchasePackage(
     BuildContext context,
-    String packageIdentifier
-  ) async {
-    if (_userID == null) throw Exception("SolydFlow not configured");
+    String packageIdentifier, {
+    String? userPhone,
+    int? customAmountKobo,
+  }) async {
+    if (_userID == null || _apiKey == null) throw Exception("SolydFlow not configured");
 
     try {
       String idempotencyKey = const Uuid().v4();
       final telemetryData = await SolydTelemetry.collect();
+      // Use either the globally configured phone or the checkout-specific phone
+      final String finalPhone = userPhone ?? _userPhone ?? "";
       
       final Map<String, dynamic> payload = {
           "user_id": _userID ?? "",
           "package_identifier": packageIdentifier,
           "email": "$_userID@solydflow.app",
+          "phone": finalPhone,
+          "custom_amount_kobo": customAmountKobo ?? 0,
           "telemetry": {
              "network_type": telemetryData['network_type'] ?? "unknown",
              "latency_ms": telemetryData['latency_ms'] ?? 0,
@@ -150,7 +162,7 @@ class SolydFlow {
       final data = response.data;
       final String provider = data['provider'] ?? 'paystack'; 
 
-      // 🟢 NATIVE STORE (APPLE / GOOGLE)
+      // NATIVE STORE (APPLE / GOOGLE)
       if (provider == 'apple' || provider == 'google') {
         final String nativeProductID = data['native_product_id'];
         
@@ -170,11 +182,45 @@ class SolydFlow {
         InAppPurchase.instance.buyNonConsumable(purchaseParam: purchaseParam);
         
         // Wait for Native Stream to finish and update DB
-        return await _verifyTransaction(data['reference']); 
+        return await _verifyTransaction(data['reference'], provider); 
       } 
+
+      // 🟢 LOCAL AFRICAN RAILS (M-Pesa / Bank Transfers)
+      else if (data['display_instruction'] != null && data['display_instruction'].toString().isNotEmpty) {
+        final String instruction = data['display_instruction'];
+        final String reference = data['reference'];
+
+        // Show Native Dialog to the user
+        showDialog(
+          context: context,
+          barrierDismissible: false, // Force them to wait
+          builder: (ctx) => AlertDialog(
+            title: const Text("Action Required", style: TextStyle(fontWeight: FontWeight.bold)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const CircularProgressIndicator(color: Colors.orange),
+                const SizedBox(height: 16),
+                Text(instruction, textAlign: TextAlign.center),
+                // If it's Monnify, show virtual account here
+                if (data['virtual_account'] != null) ...[
+                  const SizedBox(height: 16),
+                  Text(data['virtual_account']['bank_name'], style: const TextStyle(fontWeight: FontWeight.bold)),
+                  Text(data['virtual_account']['account_number'], style: const TextStyle(fontSize: 20, letterSpacing: 2)),
+                ]
+              ],
+            ),
+          ),
+        );
+
+        // Start polling immediately while the prompt is on their phone
+        final result = await _verifyTransaction(reference, provider);
+        Navigator.of(context).pop(); // Close the dialog once polling breaks
+        return result;
+      }
       
-      // 🟢 WEB PAYMENT (Paystack / Flutterwave)
-      else {
+      // STANDARD WEB CHECKOUT (Paystack / Flutterwave / Stripe)
+      else if (data['authorization_url'] != null) {
         final String authUrl = data['authorization_url'];
         final String reference = data['reference'];
 
@@ -182,14 +228,18 @@ class SolydFlow {
           return _PaymentWebView(url: authUrl, reference: reference);
         }));
 
-        return await _verifyTransaction(reference);
+        return await _verifyTransaction(reference, provider);
+      } 
+      
+      else {
+        throw Exception("Invalid gateway response: No URL or Instruction provided.");
       }
 
     } catch (e) {
-      if (e is DioException) {
-        if (e.response != null) {
-          print("❌ SolydFlow Server Error: ${e.response?.data}");
-        }
+      if (e is DioException && e.response != null) {
+        print("❌ SolydFlow Server Error: ${e.response?.data}");
+      } else {
+        print("❌ Purchase Error: $e");
       }
       rethrow;
     }
@@ -219,7 +269,7 @@ class SolydFlow {
   static Future<void> _validateNativeReceipt(PurchaseDetails purchase) async {
     String provider = Platform.isAndroid ? 'google' : 'apple';
     
-    // 🟢 FIND THE SOLYD PACKAGE ID
+    // FIND THE SOLYD PACKAGE ID
     String? solydPackageId = _nativeStoreToSolydMap[purchase.productID];
     if (solydPackageId == null) {
       print("❌ Validation Error: Could not map Native ID ${purchase.productID} to SolydFlow Package.");
@@ -237,10 +287,12 @@ class SolydFlow {
         }, 
         options: Options(headers: {"X-API-Key": _apiKey}),
       );
-
-      if (response.data['status'] == 'success') {
+      final status = response.data['status'];
+      if (status == 'SETTLED_CONSENSUS') {
         print("✅ Native Receipt Validated!");
         await _fetchFromNetwork(); // Update Cache
+      } else if (status == 'DISPUTED_MISMATCH') {
+        print("⚠️ Native Receipt Disputed by Consensus Engine. Awaiting admin review.");
       }
     } catch (e) {
       print("Native Validation Failed: $e");
@@ -272,7 +324,12 @@ class SolydFlow {
     try {
       return await _fetchFromNetwork();
     } catch (e) {
-      return CustomerInfo(userID: _userID!, activeEntitlements: {}, allEntitlements: {});
+      return CustomerInfo(
+        userID: _userID!, 
+        activeEntitlements: {}, 
+        allEntitlements: {},
+        activePackages: [],
+      );
     }
   }
 
@@ -299,23 +356,57 @@ class SolydFlow {
     } catch (e) {}
   }
 
-  static Future<CustomerInfo> _verifyTransaction(String reference) async {
+  static Future<CustomerInfo> _verifyTransaction(String reference, String provider) async {
     int attempts = 0;
     while (attempts < 10) {
       attempts++;
       try {
-        final response = await _dio.get(
+        final response = await _dio.post(
           '$_baseUrl/api/v1/pay/verify', 
-          queryParameters: {"reference": reference},
+          data: {
+            "reference": reference,
+            "provider": provider,
+          },
           options: Options(headers: {"X-API-Key": _apiKey}),
         );
-        if (response.data['status'] == 'success') {
+        final status = response.data['status'];
+
+        // Use strict state machine enums
+        if (status == 'SETTLED_CONSENSUS') {
           return await _fetchFromNetwork(); 
+        } 
+        else if (status == 'DISPUTED_MISMATCH') {
+          print("⚠️ Transaction Disputed. Breaking poll loop early.");
+          break; // Stop polling, it requires manual admin review
+        }
+        else if (status == 'PSP_FAILED' || status == 'FAILED_PERMANENT') {
+          print("❌ Transaction Failed permanently. Breaking poll loop early.");
+          break; // Stop polling, Churn Buster is handling it
         }
       } catch (e) {}
       await Future.delayed(const Duration(seconds: 2));
     }
     return await _fetchFromNetwork(); 
+  }
+
+  static Future<SolydPaywallConfig?> getPaywallConfig() async {
+    try {
+      final response = await _dio.get(
+        '$_baseUrl/api/v1/paywall',
+        options: Options(headers: {"X-API-Key": _apiKey}),
+      );
+      var data = response.data;
+      
+      // ROBUSTNESS: If server sent a String instead of a Map, decode it manually
+      if (data is String) {
+        data = jsonDecode(data); // Requires import 'dart:convert';
+      }
+      
+      return SolydPaywallConfig.fromJson(data);
+    } catch (e) {
+      print("Error fetching paywall config: $e");
+      return null;
+    }
   }
 }
 
