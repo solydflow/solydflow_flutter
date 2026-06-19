@@ -3,33 +3,45 @@
 <p align="center">
   <img src="https://www.solydflow.com/logo.png" alt="SolydFlow Logo" width="200"/>
   <br>
-  <b>The Revenue Infrastructure for African Mobile Apps.</b>
+  <b>Hybrid Revenue Infrastructure for African Mobile Apps.</b>
   <br>
   <br>
-  <a href="https://solydflow.com"><img src="https://img.shields.io/badge/Status-Public%20Alpha-orange" alt="Status"></a>
-  <!-- <a href="https://pub.dev/packages/solydflow_flutter"><img src="https://img.shields.io/badge/Platform-Flutter-blue" alt="Platform"></a> -->
-  <!-- <a href="https://solydflow.com"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a> -->
+  <a href="https://solydflow.com"><img src="https://img.shields.io/badge/Status-System%20Operational-green" alt="Status"></a>
 </p>
 
 ---
 
 ## What is SolydFlow?
 
-SolydFlow is the revenue infrastructure for African mobile apps. It unifies Paystack, Flutterwave, Apple IAP, and Google Play into a single API that handles **offline entitlements** and **transaction recovery**.
-Our current implementation are Paystack and Flutterwave, while others are in progress...
+SolydFlow is a hybrid revenue infrastructure built for African mobile apps.
 
-**The Problem:**
-If a user pays via USSD and their network drops before returning to your app, the transaction is usually lost ("Zombie Transaction").
-**The SolydFlow Solution:**
-We perform background webhook recovery, ensuring that even if the user's phone dies immediately after payment, their entitlements are unlocked when they return.
+It unifies app stores (Apple App Store and Google Play), local African payment gateways (Paystack and Flutterwave), and Stripe for global coverage and portability into a single API.
+
+Beyond payment aggregation, SolydFlow includes Smart Payment Routing, offline-first entitlement management, and transaction recovery designed for unstable network environments.
+
+### The Problem
+
+A customer completes a payment, but their network drops before your app receives confirmation.
+
+Traditionally, this results in a failed purchase experience even though the payment was successful.
+
+### The SolydFlow Solution
+
+SolydFlow continuously reconciles transactions using webhooks, entitlement synchronization, and secure local caching.
+
+Even if a customer closes the app immediately after payment, their access can be automatically restored when they return.
+
+---
 
 ## Key Features
 
-- 🌍 **Multi-Gateway Support:** Switch between Paystack and Flutterwave instantly from the dashboard. No code changes required.
-- ⚡ **Offline-First Entitlements:** User status entitlement is cached and encrypted locally.
-- 🏷️ **Dynamic Pricing:** Change prices, currency, and duration remotely without updating your app.
-- 🔄 **Smart Recovery:** Automated polling and webhook reconciliation for unstable networks.
-- 📊 **Analytics:** Track revenue and active subscribers out of the box.
+- 🌍 **Unified Revenue Infrastructure**: Manage app stores, local gateways, and global payment providers through a single integration.
+- 🧠 **Smart Payment Routing**: Route transactions to the payment rail most likely to succeed based on currency and region.
+- ⚡ **Offline-First Entitlements**: Customer access is securely cached for instant entitlement checks.
+- 🔄 **Transaction Recovery**: Automatically recover interrupted purchases using webhook reconciliation.
+- 💳 **Dynamic Pricing**: Manage products, pricing, and offers remotely from the SolydFlow Console.
+- 🎯 **No-Code Paywalls**: Publish and update paywalls without releasing a new version of your app.
+- 📊 **Subscription Analytics**: Track revenue, conversions, and customer activity from a single dashboard.
 
 ---
 
@@ -41,7 +53,7 @@ Add the package to your `pubspec.yaml`:
 dependencies:
   flutter:
     sdk: flutter
-  # For Alpha Access:
+
   solydflow_flutter:
     git:
       url: https://github.com/solydflow/solydflow_flutter.git
@@ -49,64 +61,146 @@ dependencies:
       ref: v0.4.0
 ```
 
+### Platform Requirements
+
+#### Android
+
+SolydFlow requires Android API Level 21 or higher.
+
+```kotlin
+defaultConfig {
+    minSdkVersion = 21
+}
+```
+
+#### iOS
+
+Enable the **In-App Purchase** capability in Xcode:
+
+1. Open `ios/Runner.xcworkspace`
+2. Navigate to **Signing & Capabilities**
+3. Click **+ Capability**
+4. Add **In-App Purchase**
+
+---
+
 ## Quick Start
 
-### 1. Initialization
+### 1. Initialize the SDK
 
-Initialize the SDK in your `main.dart` using the API Key from your [SolydFlow Console](https://console.solydflow.com/).
+Initialize SolydFlow as early as possible in your application lifecycle.
 
 ```dart
+import 'package:flutter/material.dart';
 import 'package:solydflow_flutter/solydflow_flutter.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   await SolydFlow.configure(
-    apiKey: "sf_live_YOUR_API_KEY", 
-    userID: "user_12345" // Your App's User ID (Email, UUID, etc.)
+    apiKey: "sf_pk_live_YOUR_PUBLIC_KEY",
+    userID: "user_12345",
+    userPhone: "2348012345678",
   );
-  
-  runApp(MyApp());
+
+  runApp(const MyApp());
 }
 ```
 
-### 2. Fetching Dynamic Paywalls
+> `userPhone` is recommended for local payment rails, churn recovery campaigns, subscription re-engagement workflows, and regional payment methods that require a phone number.
 
-Stop hardcoding prices. Fetch products configured in your Dashboard. This allows you to A/B test prices or switch currencies (NGN/USD) on the fly.
+---
+
+## Integration Options
+
+SolydFlow supports two integration approaches.
+
+### Option A: No-Code Paywall (Recommended)
+
+Build and manage your paywall directly from the SolydFlow Console without releasing new app versions.
 
 ```dart
-Future<void> showPaywall() async {
-  // Returns a list of configured packages (e.g., Monthly, Yearly)
-  List<SolydPackage> offerings = await SolydFlow.getOfferings();
-  
-  if (offerings.isEmpty) {
-    print("No products configured in dashboard");
-    return;
-  }
+showModalBottomSheet(
+  context: context,
+  isScrollControlled: true,
+  builder: (ctx) => SolydPaywall(
+    onPurchaseSuccess: (CustomerInfo info) {
+      Navigator.pop(ctx);
+    },
+  ),
+);
+```
 
-  // Display them in your UI
-  for (var package in offerings) {
-    print("Plan: ${package.name} - Price: ₦${package.amountKobo / 100}");
+### Option B: Custom UI
+
+Fetch products dynamically and render your own Flutter widgets.
+
+```dart
+Future<void> loadProducts() async {
+  List<SolydPackage> offerings =
+      await SolydFlow.getOfferings();
+
+  for (var pkg in offerings) {
+    print(
+      "${pkg.name} - ${pkg.currency} ${pkg.amountKobo / 100}"
+    );
   }
 }
 ```
 
-### 3. Making a Purchase
+---
 
-Pass the `context` (for the secure payment view) and the `identifier` of the package.
+## Fetching Products
+
+Retrieve packages configured in your SolydFlow Console.
 
 ```dart
-Future<void> buyPlan(BuildContext context, String packageID) async {
+Future<void> loadProducts() async {
+  List<SolydPackage> offerings =
+      await SolydFlow.getOfferings();
+
+  for (var pkg in offerings) {
+    if (pkg.isUpgrade) {
+      print(
+        "Upgrade Price: ${pkg.currency} ${pkg.calculatedAmountKobo / 100}"
+      );
+    } else {
+      print(
+        "Base Price: ${pkg.currency} ${pkg.amountKobo / 100}"
+      );
+    }
+  }
+}
+```
+
+SolydFlow automatically applies:
+
+- Purchasing Power Parity pricing
+- Smart Upgrade Credits
+- Regional pricing adjustments
+
+---
+
+## Making a Purchase
+
+```dart
+Future<void> buyPlan(
+  BuildContext context,
+  String packageID,
+) async {
   try {
-    // 1. Trigger Purchase (Opens WebView)
-    final CustomerInfo? info = await SolydFlow.purchasePackage(context, packageID);
+    final CustomerInfo? info =
+        await SolydFlow.purchasePackage(
+      context,
+      packageID,
+    );
 
-    if (info == null) return;
+    if (info == null) {
+      return;
+    }
 
-    // 2. Check Status Immediately
-    if (await SolydFlow.hasEntitlement("gold_access")) {
-      Navigator.pop(context); // Close Paywall
-      print("Welcome to the Gold Club!");
+    if (info.activeEntitlements["gold_access"] == true) {
+      print("Purchase successful!");
     }
   } catch (e) {
     print("Purchase failed: $e");
@@ -114,64 +208,176 @@ Future<void> buyPlan(BuildContext context, String packageID) async {
 }
 ```
 
-### 4. Checking Access (The Gatekeeper/Offline Supported)
-You can check if a user has access anywhere in your app. This checks the local encrypted cache first, making it **instant and offline-safe**.
+The SDK automatically handles:
+
+- Payment initialization
+- Payment verification
+- Entitlement activation
+- Customer synchronization
+- Transaction recovery
+
+---
+
+## Checking Access
+
+### Quick Access Check
+
+Use this when you simply need to determine whether a user has access.
 
 ```dart
-Future<void> checkAccess() async {
-  // Check for the "Entitlement ID" you set in Dashboard Step 3
-  if (await SolydFlow.hasEntitlement("gold_access")) {
-    print("User is Gold! 💎");
-    // Navigate to Premium Content
-  } else {
-    print("User is Free.");
-    // Show Paywall
-  }
+bool isGold =
+    await SolydFlow.hasEntitlement(
+      "gold_access",
+    );
+```
+
+This check is offline-safe and uses encrypted local storage.
+
+### Full Customer State
+
+Retrieve detailed customer information including active entitlements and expiration dates.
+
+```dart
+CustomerInfo info =
+    await SolydFlow.getCustomerInfo();
+```
+
+Example:
+
+```dart
+if (info.activeEntitlements["gold_access"] == true) {
+  print("User is Gold");
+}
+
+DateTime? expiry =
+    info.allEntitlements["gold_access"];
+
+if (expiry != null) {
+  print("Expires on: $expiry");
 }
 ```
 
 ---
 
-## Supported Gateways
+## Smart Payment Routing
 
-Currently configured via the SolydFlow Console:
+SolydFlow can automatically route payments to the most appropriate payment provider based on currency, geography, and routing rules configured in the dashboard.
 
-| Provider | Status | Regions |
-| :--- | :--- | :--- |
-| **Paystack** | ✅ Live | Nigeria, Ghana, Kenya, South Africa |
-| **Flutterwave** | ✅ Live | Pan-African / Global |
+Examples:
+
+| Currency | Payment Rail |
+|-----------|--------------|
+| NGN | Monnify |
+| KES | M-Pesa |
+| USD | Stripe |
+| Other | Paystack / Flutterwave |
+
+Supported routing rules can be configured from the SolydFlow Console without application updates.
 
 ---
 
-## Roadmap & Future Releases
+## Payment Rails
 
-We are building the complete financial stack for African apps.
+| Provider | Status |
+|-----------|---------|
+| Paystack | ✅ Live |
+| Flutterwave | ✅ Live |
+| Apple App Store | 🧪 Testing |
+| Google Play | 🧪 Testing |
+| Stripe | 🧪 Testing |
+| Monnify | 🚧 Planned |
+| M-Pesa / Daraja | 🚧 Planned |
 
-- [x] **Phase 1: African Rails** (Completed)
-    - Paystack & Flutterwave Integration.
-    - Webhook Recovery Engine.
-    - Dynamic Pricing Dashboard.
-- [ ] **Phase 2: Native Stores** (In Progress)
-    - **Apple IAP (StoreKit 2):** Validate App Store receipts alongside local payments.
-    - **Google Play Billing:** Unified subscription management for Android.
-- [ ] **Phase 3: Global Expansion**
-    - **Stripe:** For accepting USD/EUR payments globally.
-    - **PayPal:** For broader international reach.
-    - **Crypto (Stablecoins):** USDC acceptance for borderless payments.
+---
+
+## Test Transaction Recovery
+
+One of SolydFlow's core capabilities is transaction recovery.
+
+### Zombie Transaction Test
+
+1. Start a purchase on a physical device.
+2. Complete the payment.
+3. Force-close the app before returning to the success screen.
+4. Wait a few seconds.
+5. Re-open the application.
+6. Check the customer's entitlement.
+
+```dart
+bool hasAccess =
+    await SolydFlow.hasEntitlement(
+      "gold_access",
+    );
+```
+
+Expected result:
+
+```text
+true
+```
+
+This verifies:
+
+- Webhook configuration
+- Payment verification
+- Entitlement synchronization
+- Recovery engine functionality
+
+---
+
+## Platform Status
+
+### Live
+
+- Paystack
+- Flutterwave
+- Offline Entitlements
+- Transaction Recovery
+- No-Code Paywalls
+
+### Testing
+
+- Apple App Store
+- Google Play
+- Stripe
+
+### Planned
+
+- Monnify
+- M-Pesa / Daraja
+- Additional regional payment rails
 
 ---
 
 ## Security
 
-SolydFlow is compliant with industry standards.
-- **Non-Custodial:** We do not hold your funds. Money goes directly from the user to your Paystack/Flutterwave account.
-- **Encryption:** All local data is encrypted using AES-256.
-- **Verification:** All transactions are verified server-side via signatures.
+### Non-Custodial
+
+SolydFlow never holds your funds.
+
+Payments move directly from the customer to your connected payment provider account.
+
+### Encryption
+
+Local customer data is encrypted before storage.
+
+### Server-Side Verification
+
+All transactions are verified before entitlements are activated.
+
+---
+
+## Documentation & Support
+
+- Documentation: https://docs.solydflow.com/docs/intro
+- Console: https://console.solydflow.com
+- Website: https://solydflow.com
+- Support: support@solydflow.com
 
 ---
 
 <p align="center">
-  Built with love for African Developers.
-  <br>
-  <a href="https://solydflow.com">Get Early Access</a>
+Built for African Developers.
+<br>
+<a href="https://solydflow.com">Get Started</a>
 </p>
