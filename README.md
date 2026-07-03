@@ -369,7 +369,7 @@ All transactions are verified before entitlements are activated.
 
 ## Documentation & Support
 
-- Documentation: https://docs.solydflow.com/docs/intro
+- Documentation: https://docs.solydflow.com
 - Console: https://console.solydflow.com
 - Website: https://solydflow.com
 - Support: support@solydflow.com

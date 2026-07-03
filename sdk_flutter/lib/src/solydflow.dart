@@ -21,6 +21,7 @@ class SolydFlow {
   static String? _apiKey;
   static String? _userID;
   static String? _userPhone;
+  static String? _userEmail;
   static const String _baseUrl = "https://api.solydflow.com";
 
   static StreamSubscription<List<PurchaseDetails>>? _iapSubscription;
@@ -34,10 +35,12 @@ class SolydFlow {
     required String apiKey,
     required String userID,
     String? userPhone,
+    String? userEmail,
   }) async {
     _apiKey = apiKey;
     _userID = userID;
     _userPhone = userPhone;
+    _userEmail = userEmail;
 
     final Stream<List<PurchaseDetails>> purchaseUpdated = InAppPurchase.instance.purchaseStream;
     _iapSubscription = purchaseUpdated.listen((purchaseDetailsList) {
@@ -124,6 +127,7 @@ class SolydFlow {
     BuildContext context,
     String packageIdentifier, {
     String? userPhone,
+    String? userEmail,
     int? customAmountKobo,
   }) async {
     if (_userID == null || _apiKey == null) throw Exception("SolydFlow not configured");
@@ -133,11 +137,12 @@ class SolydFlow {
       final telemetryData = await SolydTelemetry.collect();
       // Use either the globally configured phone or the checkout-specific phone
       final String finalPhone = userPhone ?? _userPhone ?? "";
+      final String finalEmail = userEmail ?? _userEmail ?? "";
       
       final Map<String, dynamic> payload = {
           "user_id": _userID ?? "",
           "package_identifier": packageIdentifier,
-          "email": "$_userID@solydflow.app",
+          "email": finalEmail,
           "phone": finalPhone,
           "custom_amount_kobo": customAmountKobo ?? 0,
           "telemetry": {
